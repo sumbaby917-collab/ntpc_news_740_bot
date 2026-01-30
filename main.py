@@ -1,15 +1,15 @@
 import feedparser, requests, datetime, os, urllib.parse, google.generativeai as genai
 
-# 1. 讀取金鑰 (GitHub Secrets)
+# 1. 讀取密鑰 (請確認 GitHub Secrets 中有名為 GEMINI_API_KEY 的設定)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 精確配置 (直接宣告完整字串，不透過任何變數)
+# 2. 初始化 AI (強制鎖定穩定路徑)
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 此處嚴禁修改，必須完整顯示：gemini-1.5-flash
+        # 這裡絕對不手動修改，確保引號內完整顯示
         model = genai.GenerativeModel('gemini-1.5-flash')
     except:
         model = None
@@ -20,15 +20,14 @@ else:
 KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身學習"]
 
 def get_ai_analysis(title):
-    if not model: return "摘要：AI未配置。\n因應：請檢查設定。"
-    prompt = f"針對新聞「{title}」，以新北官員口吻產出兩句摘要與一項建議。"
+    if not model: return "摘要：AI助理尚未就緒。\n因應：請檢查 API 金鑰設定。"
+    prompt = f"針對新聞「{title}」，以新北教育局官員口吻產出兩句摘要與一項建議。"
     try:
-        # 直接執行內容生成
         response = model.generate_content(prompt)
-        return response.text.strip() if response.text else "AI回應內容為空"
+        return response.text.strip() if response.text else "解析內容暫無回傳"
     except Exception as e:
-        # 捕捉精確錯誤並顯示前 20 字，用於判斷 404
-        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:20]})"
+        # 顯示前 15 個字以利確認錯誤類型
+        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:15]})"
 
 def generate_report():
     report = f"📋 *教育局業務輿情每日報告 ({datetime.date.today()})*\n"
