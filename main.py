@@ -48,3 +48,16 @@ if __name__ == "__main__":
     final_report = generate_report()
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                   data={"chat_id": CHAT_ID, "text": final_report, "parse_mode": "Markdown", "disable_web_page_preview": True})
+
+def get_ai_analysis(title):
+    # 這是除錯行：它會告訴我們程式碼裡到底抓到什麼名稱
+    actual_name = 'gemini-1.5-flash' 
+    if not model: return f"錯誤：模型未配置。嘗試名稱為: {actual_name}"
+    
+    prompt = f"針對新聞「{title}」，以官員口吻產出兩句摘要與一項建議。"
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip() if response.text else "解析內容為空"
+    except Exception as e:
+        # 如果失敗，把完整錯誤訊息傳到 Telegram
+        return f"偵錯訊息：{str(e)}"
