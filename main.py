@@ -1,15 +1,15 @@
 import feedparser, requests, datetime, os, urllib.parse, google.generativeai as genai
 
-# 1. 讀取環境變數 (請確認 GitHub Secrets 有 GEMINI_API_KEY)
+# 1. 初始化設定 (從 GitHub Secrets 讀取)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 初始化 AI (手寫官方完整字串，絕不使用變數代入)
+# 2. 設定模型 (嚴格鎖定官方標準路徑)
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 此行引號內嚴禁任何空格或贅字
+        # 注意：引號內必須完整顯示為 gemini-1.5-flash
         model = genai.GenerativeModel('gemini-1.5-flash')
     except:
         model = None
@@ -21,20 +21,21 @@ KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身�
 
 def get_ai_analysis(title):
     if not model: return "摘要：AI未配置。\n因應：請檢查金鑰。"
-    prompt = f"你是一位新北官員，請針對「{title}」產出兩句摘要與一項行政建議。"
+    prompt = f"針對新聞「{title}」，以新北官員口吻產出兩句摘要與一項行政建議。"
     try:
         response = model.generate_content(prompt)
-        return response.text.strip() if response.text else "解析內容為空"
+        return response.text.strip() if response.text else "解析內容暫無回應"
     except Exception as e:
-        # 只顯示前 15 個字，用於抓出是否還有 404 字眼
-        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:15]})"
+        # 只顯示報錯前 15 字，方便最後判斷是否還有 404 字眼
+        return f"摘要：分析失敗。\n因應：監控中。({str(e)[:15]})"
 
 def generate_report():
-    report = f"📋 *教育局輿情報告 ({datetime.date.today()})*\n"
+    report = f"📋 *教育局業務輿情報告 ({datetime.date.today()})*\n"
     report += "━━━━━━━━━━━━━━━━━━━━\n"
     for kw in KEYWORDS:
-        report += f"\n🔍 *業務：{kw.replace('新北市 ', '')}*\n"
-        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(kw)}+when:24h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        report += f"\n🔍 *業務類別：{kw.replace('新北市 ', '')}*\n"
+        safe_kw = urllib.parse.quote(kw)
+        url = f"https://news.google.com/rss/search?q={safe_kw}+when:24h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
         feed = feedparser.parse(url)
         if not feed.entries:
             report += "今日暫無新聞。\n"
