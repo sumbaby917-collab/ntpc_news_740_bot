@@ -5,11 +5,11 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 直接初始化 (嚴格鎖定官方路徑)
+# 2. 配置 AI (嚴格鎖定官方正確路徑)
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 直接使用官方字串，不透過任何變數轉換
+        # 這裡必須是 'gemini-1.5-flash'，請確保貼上後完整無缺
         model = genai.GenerativeModel('gemini-1.5-flash')
     except:
         model = None
@@ -20,13 +20,13 @@ else:
 KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身學習"]
 
 def get_ai_analysis(title):
-    if not model: return "摘要：AI未配置。\n因應：請檢查金鑰。"
-    prompt = f"針對新聞「{title}」，以新北教育局官員口吻產出兩句摘要與一項具體建議。"
+    if not model: return "摘要：AI未配置。\n因應：請檢查設定。"
+    prompt = f"針對新聞標題「{title}」，以新北教育局官員口吻產出兩句摘要與一項建議。"
     try:
         response = model.generate_content(prompt)
         return response.text.strip() if response.text else "AI回應內容為空"
     except Exception as e:
-        # 只顯示報錯代碼，若仍出現 404 models，代表系統偵測不到名稱
+        # 顯示前 15 個字以利確認模型名稱是否正確
         return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:15]})"
 
 def generate_report():
