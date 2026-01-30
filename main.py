@@ -1,32 +1,34 @@
 import feedparser, requests, datetime, os, urllib.parse, google.generativeai as genai
 
-# 1. 初始化 (從 GitHub Secrets 讀取)
+# 1. 讀取金鑰
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 設定模型 (嚴格鎖定名稱，絕無多餘字眼)
+# 2. 配置 AI (嚴格校對模型名稱)
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 注意：引號內必須只有 gemini-1.5-flash
+        # 注意：這裡必須完全是 'gemini-1.5-flash'，不可多也不可少
         model = genai.GenerativeModel('gemini-1.5-flash')
     except:
         model = None
 else:
     model = None
 
+# 搜尋關鍵字
 KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身學習"]
 
 def get_ai_analysis(title):
-    if not model: return "摘要：AI未配置。\n因應：請檢查金鑰。"
-    prompt = f"針對新聞「{title}」，以新北教育局官員口吻產出兩句摘要與一項建議。"
+    if not model: return "摘要：AI未配置。\n因應：請檢查設定。"
+    prompt = f"針對新聞「{title}」，以新北教育局官員口吻產出：摘要(兩句)與因應建議(一項)。"
     try:
+        # 強制呼叫正確的模型
         response = model.generate_content(prompt)
-        return response.text.strip()
+        return response.text.strip() if response.text else "無法解析內容"
     except Exception as e:
-        # 只顯示前 20 個字，避免錯誤訊息太長干擾
-        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:20]})"
+        # 顯示前 30 個字以利確認模型名稱是否正確
+        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:30]})"
 
 def generate_report():
     report = f"📋 *教育局業務輿情每日報告 ({datetime.date.today()})*\n"
