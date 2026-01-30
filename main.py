@@ -48,3 +48,4 @@ if __name__ == "__main__":
     final_report = generate_report()
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                   data={"chat_id": CHAT_ID, "text": final_report, "parse_mode": "Markdown", "disable_web_page_preview": True})
+
