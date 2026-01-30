@@ -5,18 +5,18 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 配置 AI (嚴格校對模型名稱，確保無誤)
+# 2. 直接初始化 (嚴格鎖定官方路徑)
 if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 固定使用最穩定的模型名稱，請勿手動修改此行
+        # 直接使用官方字串，不透過任何變數轉換
         model = genai.GenerativeModel('gemini-1.5-flash')
     except:
         model = None
 else:
     model = None
 
-# 業務搜尋關鍵字
+# 業務關鍵字
 KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身學習"]
 
 def get_ai_analysis(title):
@@ -26,8 +26,8 @@ def get_ai_analysis(title):
         response = model.generate_content(prompt)
         return response.text.strip() if response.text else "AI回應內容為空"
     except Exception as e:
-        # 只顯示前 10 個字，避免錯誤訊息太長
-        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:10]})"
+        # 只顯示報錯代碼，若仍出現 404 models，代表系統偵測不到名稱
+        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:15]})"
 
 def generate_report():
     report = f"📋 *教育局業務輿情每日報告 ({datetime.date.today()})*\n"
