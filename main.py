@@ -1,28 +1,32 @@
 import feedparser, requests, datetime, os, urllib.parse, google.generativeai as genai
 
-# 1. 讀取金鑰
+# 1. 初始化 (從 GitHub Secrets 讀取)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-api_key = os.getenv('GEMINI_API_KEY')
+GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 設定 AI 模型 (嚴格校正名稱)
-if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+# 2. 設定模型 (嚴格鎖定名稱，絕無多餘字眼)
+if GEMINI_KEY:
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        # 注意：引號內必須只有 gemini-1.5-flash
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except:
+        model = None
 else:
     model = None
 
-# 業務搜尋關鍵字
 KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身學習"]
 
 def get_ai_analysis(title):
     if not model: return "摘要：AI未配置。\n因應：請檢查金鑰。"
-    prompt = f"請針對新聞「{title}」產出摘要與行政因應建議。"
+    prompt = f"針對新聞「{title}」，以新北教育局官員口吻產出兩句摘要與一項建議。"
     try:
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:30]})"
+        # 只顯示前 20 個字，避免錯誤訊息太長干擾
+        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:20]})"
 
 def generate_report():
     report = f"📋 *教育局業務輿情每日報告 ({datetime.date.today()})*\n"
@@ -33,7 +37,7 @@ def generate_report():
         url = f"https://news.google.com/rss/search?q={safe_kw}+when:24h&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
         feed = feedparser.parse(url)
         if not feed.entries:
-            report += "今日暫無相關新聞。\n"
+            report += "今日暫無新聞。\n"
             continue
         for entry in feed.entries[:2]:
             report += f"📍 *新聞*：{entry.title}\n{get_ai_analysis(entry.title)}\n🔗 [原文連結]({entry.link})\n"
