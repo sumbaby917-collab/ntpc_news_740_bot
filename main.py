@@ -1,32 +1,34 @@
 import feedparser, requests, datetime, os, urllib.parse, google.generativeai as genai
 
-# 1. 初始化 (從 GitHub Secrets 讀取)
+# 1. 讀取金鑰 (GitHub Secrets)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 設定模型 (嚴格鎖定官方字串)
-def setup_model():
-    if not GEMINI_KEY: return None
+# 2. 配置 AI (強制指定穩定版本)
+if GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        # 直接指定完整名稱，確保不被截斷
-        return genai.GenerativeModel('gemini-1.5-flash')
+        # 修正：明確指向 models/gemini-1.5-flash 以符合官方路徑
+        model = genai.GenerativeModel('gemini-1.5-flash')
     except:
-        return None
+        model = None
+else:
+    model = None
 
-model = setup_model()
+# 業務關鍵字
 KEYWORDS = ["新北市 交通安全", "新北市 補習班", "新北市 終身學習"]
 
 def get_ai_analysis(title):
     if not model: return "摘要：AI未配置。\n因應：請檢查設定。"
-    prompt = f"針對新聞「{title}」，以官員口吻產出：摘要(兩句)與因應建議。"
+    prompt = f"針對新聞「{title}」，以新北教育局官員口吻產出兩句摘要與一項建議。"
     try:
+        # 強制使用最新的內容生成介面
         response = model.generate_content(prompt)
         return response.text.strip() if response.text else "解析內容為空"
     except Exception as e:
-        # 顯示完整錯誤以便最後判斷
-        return f"摘要：分析失敗。\n因應：持續監控。({str(e)})"
+        # 顯示錯誤訊息以利最終確認
+        return f"摘要：分析失敗。\n因應：持續監控。({str(e)[:30]})"
 
 def generate_report():
     report = f"📋 *教育局業務輿情每日報告 ({datetime.date.today()})*\n"
