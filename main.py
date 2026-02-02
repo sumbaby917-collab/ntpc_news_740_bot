@@ -1,4 +1,4 @@
-# Final Version Check 0202
+# Final Deploy - API Status: Enabled
 import feedparser, requests, datetime, os, urllib.parse, json
 
 # 1. 讀取環境變數
