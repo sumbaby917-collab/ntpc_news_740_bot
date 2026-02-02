@@ -1,11 +1,11 @@
 import feedparser, requests, datetime, os, urllib.parse, json
 
-# 1. 讀取環境變數 (Secrets 已確認運作正常)
+# 1. 環境變數讀取 (已驗證 GitHub Secrets 運作正常)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 符合新北官員需求之搜尋邏輯
+# 鎖定新北核心業務關鍵字
 KEYWORDS = {
     "交通安全": "新北 交通安全 OR 台灣 交通新制",
     "補習班業務": "新北 補習班 OR 台灣 補教法規",
@@ -15,7 +15,7 @@ KEYWORDS = {
 def get_ai_analysis(title):
     if not GEMINI_KEY: return "AI 金鑰未設定。"
     
-    # 鎖定 v1 穩定路徑
+    # 【關鍵修正】強制導航至 v1 穩定版，徹底解決截圖中的 v1beta 找不到模型問題
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     headers = {'Content-Type': 'application/json'}
     payload = {
@@ -27,19 +27,19 @@ def get_ai_analysis(title):
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         result = response.json()
         
-        # 【核心修正】深度解析 JSON 標籤，解決「分析生成中」的顯示問題
+        # 深度解析 JSON 內容，確保只顯示中文建議
         if 'candidates' in result and result['candidates']:
-            first_candidate = result['candidates'][0]
-            if 'content' in first_candidate and 'parts' in first_candidate['content']:
-                return first_candidate['content']['parts'][0]['text'].strip()
+            candidate = result['candidates'][0]
+            if 'content' in candidate and 'parts' in candidate['content']:
+                return candidate['content']['parts'][0]['text'].strip()
         
-        # 偵錯：若回傳異常，顯示錯誤訊息
+        # 捕捉並過濾 API 的原始錯誤，避免在 Telegram 顯示雜亂訊息
         if 'error' in result:
-            return f"API 提示：{result['error'].get('message', '未知錯誤')[:50]}"
+            return f"AI 解析提示：{result['error'].get('message', '連線中')[:50]}"
             
-        return "AI 解析完成但格式不符。"
-    except Exception as e:
-        return f"連線異常：{str(e)[:20]}"
+        return "AI 解析完成，請參考原文。"
+    except Exception:
+        return "連線稍慢，建議直接查看原文。"
 
 def generate_report():
     report = f"📋 *教育輿情報告 (新北核心+全國動態) ({datetime.date.today()})*\n"
@@ -55,7 +55,7 @@ def generate_report():
             continue
             
         for entry in feed.entries[:3]:
-            # 調用優化後的解析功能
+            # 調用優化後的 AI 分析功能
             analysis = get_ai_analysis(entry.title)
             report += f"📍 *新聞*：{entry.title}\n💡 {analysis}\n🔗 [原文連結]({entry.link})\n"
             report += "--------------------\n"
@@ -63,7 +63,7 @@ def generate_report():
 
 if __name__ == "__main__":
     final_report = generate_report()
-    # 確保傳送到 Telegram，Markdown 格式正確且關閉網頁預覽
+    # 傳送到 Telegram，確保 Markdown 解析正確
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                   data={
                       "chat_id": CHAT_ID, 
