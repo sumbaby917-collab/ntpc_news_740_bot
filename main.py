@@ -1,22 +1,11 @@
-import feedparser, requests, datetime, os, urllib.parse, google.generativeai as genai
+import feedparser, requests, datetime, os, urllib.parse, json
 
-# 1. 讀取密鑰
+# 1. 讀取環境變數
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 2. 初始化 AI (強制切換到穩定版 v1 接口，解決 404 問題)
-if GEMINI_KEY:
-    try:
-        # transport='rest' 能確保 SDK 避開導致 404 的 v1beta 通道
-        genai.configure(api_key=GEMINI_KEY, transport='rest')
-        model = genai.GenerativeModel('gemini-1.5-flash')
-    except:
-        model = None
-else:
-    model = None
-
-# 符合您的最新需求：新北為主，全國為輔
+# 擴大搜尋關鍵字 (新北+全國)
 KEYWORDS = {
     "交通安全": "新北 交通安全 OR 台灣 交通新制",
     "補習班業務": "新北 補習班 OR 台灣 補教業務",
@@ -24,23 +13,37 @@ KEYWORDS = {
 }
 
 def get_ai_analysis(title):
-    if not model: return "摘要：AI未就緒。\n建議：請確認密鑰設定。"
-    # 指令 AI 扮演新北官員並分析借鏡意義
-    prompt = f"你是一位新北教育官員，請針對新聞「{title}」產出兩句摘要與一項建議。若是外縣市新聞，請分析對新北業務的借鏡價值。請用繁體中文。"
+    if not GEMINI_KEY: return "偵錯：找不到 API Key"
+    
+    # 直接呼叫 Google API 穩定版接口 (v1)，徹底避開 v1beta 錯誤
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": f"你是一位新北教育官員，請針對新聞「{title}」產出兩句摘要與一項建議。若是外縣市新聞，請分析對新北業務的借鏡價值。請用繁體中文。"
+            }]
+        }]
+    }
+
     try:
-        response = model.generate_content(prompt)
-        return response.text.strip() if response.text else "解析成功但無內容"
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        result = response.json()
+        # 讀取回傳內容
+        return result['candidates'][0]['content']['parts'][0]['text'].strip()
     except Exception as e:
-        return f"診斷：{str(e)[:50]}"
+        # 如果失敗，回傳最底層的錯誤代碼
+        return f"偵錯訊息：{str(response.status_code) if 'response' in locals() else '連線失敗'}"
 
 def generate_report():
-    report = f"📋 *教育輿情報告 (新北+全國) ({datetime.date.today()})*\n"
+    report = f"📋 *教育輿情報告 (新北核心+全國) ({datetime.date.today()})*\n"
     report += "━━━━━━━━━━━━━━━━━━━━\n"
     for label, query in KEYWORDS.items():
         report += f"\n🔍 *類別：{label}*\n"
         safe_query = urllib.parse.quote(f"{query} when:24h")
-        url = f"https://news.google.com/rss/search?q={safe_query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
-        feed = feedparser.parse(url)
+        rss_url = f"https://news.google.com/rss/search?q={safe_query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+        feed = feedparser.parse(rss_url)
         
         if not feed.entries:
             report += "今日暫無相關新聞。\n"
