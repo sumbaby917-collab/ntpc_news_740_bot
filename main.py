@@ -1,4 +1,3 @@
-# Final Deploy - API Status: Enabled
 import feedparser, requests, datetime, os, urllib.parse, json
 
 # 1. 讀取環境變數
@@ -6,17 +5,17 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 擴大搜尋關鍵字 (新北+全國)
+# 您指定的精確關鍵字 (新北為主，涵蓋全國)
 KEYWORDS = {
     "交通安全": "新北 交通安全 OR 台灣 交通新制",
-    "補習班業務": "新北 補習班 OR 台灣 補教業務",
+    "補習班業務": "新北 補習班 OR 台灣 補教法規",
     "終身學習": "新北 終身學習 OR 台灣 社區大學"
 }
 
 def get_ai_analysis(title):
     if not GEMINI_KEY: return "偵錯：找不到 API Key"
     
-    # 直接呼叫 Google API 穩定版接口 (v1)，徹底避開 v1beta 錯誤
+    # 關鍵修正：直接呼叫穩定版 v1 接口，完全避開出錯的 v1beta
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     
     headers = {'Content-Type': 'application/json'}
@@ -31,17 +30,20 @@ def get_ai_analysis(title):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         result = response.json()
-        # 讀取回傳內容
-        return result['candidates'][0]['content']['parts'][0]['text'].strip()
+        # 讀取回傳結果
+        if 'candidates' in result:
+            return result['candidates'][0]['content']['parts'][0]['text'].strip()
+        else:
+            return f"偵錯：API回應異常 - {result.get('error', {}).get('message', '未知錯誤')}"
     except Exception as e:
-        # 如果失敗，回傳最底層的錯誤代碼
-        return f"偵錯訊息：{str(response.status_code) if 'response' in locals() else '連線失敗'}"
+        return f"偵錯：連線失敗 - {str(e)[:30]}"
 
 def generate_report():
-    report = f"📋 *教育輿情報告 (新北核心+全國) ({datetime.date.today()})*\n"
+    report = f"📋 *教育輿情報告 (新北核心+全國動態) ({datetime.date.today()})*\n"
     report += "━━━━━━━━━━━━━━━━━━━━\n"
     for label, query in KEYWORDS.items():
-        report += f"\n🔍 *類別：{label}*\n"
+        report += f"\n🔍 *分類：{label}*\n"
+        # 搜尋最近 24 小時新聞
         safe_query = urllib.parse.quote(f"{query} when:24h")
         rss_url = f"https://news.google.com/rss/search?q={safe_query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
         feed = feedparser.parse(rss_url)
@@ -59,4 +61,3 @@ if __name__ == "__main__":
     final_report = generate_report()
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                   data={"chat_id": CH_ID, "text": final_report, "parse_mode": "Markdown", "disable_web_page_preview": True})
-    
