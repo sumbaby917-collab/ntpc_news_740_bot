@@ -1,11 +1,11 @@
 import feedparser, requests, datetime, os, urllib.parse, json
 
-# 1. 環境變數讀取
+# 1. 讀取密鑰
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 符合您需求：新北核心為主，全國為輔
+# 精準關鍵字設定
 KEYWORDS = {
     "交通安全": "新北 交通安全 OR 台灣 交通新制",
     "補習班業務": "新北 補習班 OR 台灣 補教業務",
@@ -15,7 +15,7 @@ KEYWORDS = {
 def get_ai_analysis(title):
     if not GEMINI_KEY: return "偵錯：未偵測到金鑰"
     
-    # 關鍵修正：硬寫入 v1 穩定版路徑，解決截圖中的 v1beta 異常
+    # 關鍵修正：直接瞄準 v1 穩定路徑，徹底解決截圖中的 v1beta 異常
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     
     payload = {
@@ -27,20 +27,21 @@ def get_ai_analysis(title):
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        # 移除 SDK 依賴，直接進行 API 呼叫
+        response = requests.post(url, json=payload, timeout=15)
         result = response.json()
         if 'candidates' in result:
             return result['candidates'][0]['content']['parts'][0]['text'].strip()
         else:
-            return "摘要：AI服務連線中，請稍後再試。"
+            # 幫助我們抓出最後的錯誤原因
+            error_msg = result.get('error', {}).get('message', '連線中')
+            return f"摘要：{error_msg[:30]}"
     except:
-        return "摘要：連線不穩定。"
+        return "摘要：連線稍慢，請手動確認原文。"
 
 def generate_report():
-    # 標題與日期
     report = f"📋 *教育輿情報告 (新北核心+全國動態) ({datetime.date.today()})*\n"
     report += "━━━━━━━━━━━━━━━━━━━━\n"
-    
     for label, query in KEYWORDS.items():
         report += f"\n🔍 *分類：{label}*\n"
         safe_query = urllib.parse.quote(f"{query} when:24h")
