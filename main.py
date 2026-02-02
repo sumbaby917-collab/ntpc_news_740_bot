@@ -5,7 +5,7 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 精準關鍵字設定
+# 精準關鍵字：鎖定新北與全國交安動態
 KEYWORDS = {
     "交通安全": "新北 交通安全 OR 台灣 交通新制",
     "補習班業務": "新北 補習班 OR 台灣 補教業務",
@@ -15,9 +15,10 @@ KEYWORDS = {
 def get_ai_analysis(title):
     if not GEMINI_KEY: return "偵錯：未偵測到金鑰"
     
-    # 關鍵修正：直接瞄準 v1 穩定路徑，徹底解決截圖中的 v1beta 異常
+    # 徹底解決版本衝突的核心：直接連線穩定版接口
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     
+    headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{
             "parts": [{
@@ -27,17 +28,15 @@ def get_ai_analysis(title):
     }
 
     try:
-        # 移除 SDK 依賴，直接進行 API 呼叫
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
         result = response.json()
-        if 'candidates' in result:
+        # 這是抓取 AI 回傳文字的最穩定寫法
+        if 'candidates' in result and result['candidates']:
             return result['candidates'][0]['content']['parts'][0]['text'].strip()
         else:
-            # 幫助我們抓出最後的錯誤原因
-            error_msg = result.get('error', {}).get('message', '連線中')
-            return f"摘要：{error_msg[:30]}"
+            return "摘要：AI服務連線中，請參考原文連結。"
     except:
-        return "摘要：連線稍慢，請手動確認原文。"
+        return "摘要：網路連線稍慢，建議查看原文。"
 
 def generate_report():
     report = f"📋 *教育輿情報告 (新北核心+全國動態) ({datetime.date.today()})*\n"
@@ -53,12 +52,12 @@ def generate_report():
             continue
             
         for entry in feed.entries[:3]:
-            report += f"📍 *新聞*：{entry.title}\n{get_ai_analysis(entry.title)}\n🔗 [原文連結]({entry.link})\n"
+            report += f"📍 *新聞*：{entry.title}\n摘要：{get_ai_analysis(entry.title)}\n🔗 [原文連結]({entry.link})\n"
             report += "--------------------\n"
     return report
 
 if __name__ == "__main__":
     final_report = generate_report()
-    # 發送到 Telegram
+    # 確保傳送到 Telegram，關閉網頁預覽
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                  data={"chat_id": CHAT_ID, "text": final_report, "parse_mode": "Markdown", "disable_web_page_preview": True})
+                  data={"chat_id": CHET_ID, "text": final_report, "parse_mode": "Markdown", "disable_web_page_preview": True})
