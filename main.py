@@ -1,11 +1,16 @@
-import feedparser, requests, datetime, os, urllib.parse, json
+import feedparser, requests, datetime, os, urllib.parse
+import google.generativeai as genai
 
-# 1. 讀取環境變數 (已驗證運作正常)
+# 1. 讀取環境變數 (您的 Secret 已確認運作正常)
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 GEMINI_KEY = os.getenv('GEMINI_API_KEY')
 
-# 精準關鍵字：鎖定新北政務核心
+# 2. 設定 Gemini (強制使用官方最新穩定格式)
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+# 精準關鍵字：鎖定新北政務
 KEYWORDS = {
     "交通政務": "新北 交通安全 OR 侯友宜 視察 OR 淡江大橋 通車",
     "教育業務": "新北 補習班 OR 新北 終身學習 OR 技職統測 衝刺",
@@ -14,29 +19,17 @@ KEYWORDS = {
 def get_ai_analysis(title):
     if not GEMINI_KEY: return "AI 設定檢查中。"
     
-    # 【關鍵修正】強制路徑寫死在 v1 正式版，避開導致失敗的 v1beta 測試路徑
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
-    headers = {'Content-Type': 'application/json'}
-    payload = {
-        "contents": [{"parts": [{"text": f"你是一位新北教育局官員，請針對新聞「{title}」產出兩句摘要與一項建議。若是外縣市新聞，請分析對新北業務的借鏡價值。請用繁體中文。"}]}]
-    }
+    prompt = f"你是一位新北教育局官員，請針對新聞「{title}」產出兩句摘要與一項建議。若是外縣市新聞，請分析對新北業務的借鏡價值。請用繁體中文。"
 
     try:
-        # 設定充足的 30 秒等待時間
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        result = response.json()
-        
-        # 【強效解析邏輯】確保層層遞進抓取文字內容
-        if 'candidates' in result and result['candidates']:
-            candidate = result['candidates'][0]
-            if 'content' in candidate and 'parts' in candidate['content']:
-                text_content = candidate['content']['parts'][0].get('text', '')
-                if text_content:
-                    return text_content.strip()
-        
-        return "分析生成中，請點擊原文參閱。"
-    except Exception:
-        return "網路連線稍慢。"
+        # 使用官方 SDK 最穩定的生成方式
+        response = model.generate_content(prompt)
+        if response and response.text:
+            return response.text.strip()
+        return "摘要：AI 生成中，請點擊原文參考。"
+    except Exception as e:
+        # 顯示具體錯誤，幫助我們做最後判斷
+        return f"解析提示：服務連線中 ({str(e)[:20]})"
 
 def generate_report():
     report = f"📋 *教育輿情報告 (新北核心+全國動態) ({datetime.date.today()})*\n"
@@ -52,7 +45,6 @@ def generate_report():
             continue
             
         for entry in feed.entries[:3]:
-            # 調用強效解析後的 AI 功能
             analysis = get_ai_analysis(entry.title)
             report += f"📍 *新聞*：{entry.title}\n💡 {analysis}\n🔗 [原文連結]({entry.link})\n"
             report += "--------------------\n"
@@ -60,7 +52,7 @@ def generate_report():
 
 if __name__ == "__main__":
     final_report = generate_report()
-    # 確保傳送到 Telegram，Markdown 格式正確且不顯示網頁預覽
+    # 傳送到 Telegram，確保 Markdown 格式正確
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                   data={
                       "chat_id": CHAT_ID, 
