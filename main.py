@@ -6,6 +6,10 @@ on:
     # 每天台灣時間 07:40 = UTC 23:40（前一天）
     - cron: "40 23 * * *"
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   run-report:
     runs-on: ubuntu-latest
@@ -24,21 +28,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install feedparser requests google-generativeai
 
-      # ✅ 下載上一輪的 sent_cache artifact（若首次執行找不到也不會失敗）
-      - name: Download previous sent cache artifact
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: daily.yml
-          name: sent-cache
-          path: .
-          if_no_artifact_found: ignore
-
-      # （可選）列出目前 workspace 檔案，方便你 debug
-      - name: Debug list files
+      # ✅ 下載最近一次「成功」run 的 sent-cache artifact（抓不到也不讓 workflow 失敗）
+      - name: Download previous sent cache (best-effort)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          WF_NAME: Daily Report Bot
+          ART_NAME: sent-cache
         run: |
+          echo "Finding latest successful run for workflow: $WF_NAME"
+          RUN_ID=$(gh api -H "Accept: application/vnd.github+json" \
+            "/repos/$REPO/actions/workflows" \
+            --jq ".workflows[] | select(.name==\"$WF_NAME\") | .id" | head -n 1)
+
+          echo "Workflow id: $RUN_ID"
+          LAST_OK_RUN=$(gh api -H "Accept: application/vnd.github+json" \
+            "/repos/$REPO/actions/workflows/$RUN_ID/runs?status=success&per_page=1" \
+            --jq ".workflow_runs[0].id")
+
+          if [ -z "$LAST_OK_RUN" ] || [ "$LAST_OK_RUN" = "null" ]; then
+            echo "No successful runs found yet. Skip downloading cache."
+            exit 0
+          fi
+
+          echo "Latest successful run id: $LAST_OK_RUN"
+          gh run download "$LAST_OK_RUN" -n "$ART_NAME" -D . || true
           ls -la
-          if [ -f sent_cache.json ]; then echo "sent_cache.json exists"; else echo "sent_cache.json not found"; fi
+          if [ -f sent_cache.json ]; then
+            echo "sent_cache.json downloaded."
+          else
+            echo "sent_cache.json not found after download. Continue without cache."
+          fi
 
       - name: Run bot
         env:
@@ -48,8 +69,9 @@ jobs:
         run: |
           python main.py
 
-      # ✅ 上傳新的 sent_cache artifact，供下次 run 下載使用
+      # ✅ 無論前面是否成功下載 cache，都嘗試上傳新的 cache（有檔才上傳）
       - name: Upload sent cache artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sent-cache
