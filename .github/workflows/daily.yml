@@ -1,54 +1,37 @@
 name: Daily Report Bot
 
 on:
-  workflow_dispatch:
+  # 台灣時間 07:40（UTC 23:40）
   schedule:
-    # 每天台灣時間 07:40（UTC 23:40）
     - cron: "40 23 * * *"
+  # 保留手動執行（僅供測試）
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  run_bot:
+  run-report:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: "3.9"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install feedparser requests google-generativeai
 
-      # ✅ 下載 sent_cache（不存在也不會失敗）
-      - name: Restore sent_cache artifact (soft)
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: sent-cache
-          path: .
-
-      - name: Run script
+      - name: Run news bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python main.py
-
-      # ✅ 上傳 sent_cache（有檔才會上傳）
-      - name: Upload sent_cache artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sent-cache
-          path: sent_cache.json
-          if-no-files-found: ignore
-          retention-days: 14
