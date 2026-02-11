@@ -1,5 +1,9 @@
-import os, json, time, datetime, traceback, urllib.parse, re, requests, feedparser
+import os, json, time, datetime, traceback, urllib.parse, requests, feedparser
+from zoneinfo import ZoneInfo
 
+# ======================
+# 基本設定
+# ======================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -11,6 +15,51 @@ MAX_OTHER = 2
 MIN_TOTAL = 3
 TG_MAX = 3500
 
+# ======================
+# 台灣時間鎖（07:40-07:49 才自動送）
+# ======================
+def taipei_time_lock():
+    """
+    自動排程：只允許台灣時間 07:40～07:49 發送（10 分鐘容錯窗）
+    並用 state/last_sent_date.txt 防止同日重複發送
+
+    手動 workflow_dispatch：允許立即發送（用來測試）
+    """
+    tz = ZoneInfo("Asia/Taipei")
+    now = datetime.datetime.now(tz)
+    today = now.date().isoformat()
+
+    # 容錯窗：07:40 - 07:49
+    in_window = (now.hour == 7 and 40 <= now.minute <= 49)
+
+    # GitHub event 名稱：schedule / workflow_dispatch / push...
+    is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    if is_manual:
+        return True
+
+    state_file = os.path.join("state", "last_sent_date.txt")
+    if os.path.exists(state_file):
+        try:
+            last = open(state_file, "r", encoding="utf-8").read().strip()
+            if last == today:
+                print("Already sent today. Exit.")
+                return False
+        except:
+            pass
+
+    if not in_window:
+        print(f"Not in Taipei window. Now={now.isoformat()}. Exit.")
+        return False
+
+    # 進入窗口且尚未送出：先寫入狀態避免併發重複
+    os.makedirs("state", exist_ok=True)
+    with open(state_file, "w", encoding="utf-8") as f:
+        f.write(today)
+    return True
+
+# ======================
+# 工具
+# ======================
 def html(s):
     return (s or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace('"',"&quot;")
 
@@ -18,7 +67,7 @@ def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
             return json.load(open(CACHE_FILE,"r",encoding="utf-8"))
-        except: 
+        except:
             pass
     return {}
 
@@ -28,7 +77,7 @@ def save_cache(c):
 def prune_cache(c):
     now = int(time.time())
     for k in list(c.keys()):
-        if now - c[k].get("ts",0) > CACHE_DAYS*86400:
+        if now - c[k].get("ts",0) > CACHE_DAYS * 86400:
             del c[k]
 
 def tg_send(text):
@@ -43,35 +92,39 @@ def tg_send(text):
 def tg_send_chunked(msg):
     parts, buf = [], ""
     for p in msg.split("\n\n"):
-        if len(buf)+len(p) < TG_MAX:
-            buf += ("\n\n"+p if buf else p)
+        if len(buf) + len(p) < TG_MAX:
+            buf += ("\n\n" + p if buf else p)
         else:
-            parts.append(buf); buf=p
-    if buf: parts.append(buf)
-    for i,p in enumerate(parts,1):
-        tg_send((f"（{i}/{len(parts)}）\n" if len(parts)>1 else "") + p)
+            parts.append(buf)
+            buf = p
+    if buf:
+        parts.append(buf)
+
+    for i, p in enumerate(parts, 1):
+        tg_send((f"（{i}/{len(parts)}）\n" if len(parts) > 1 else "") + p)
         time.sleep(1)
 
 # ======================
 # 新聞處理
 # ======================
 NTPC_KEYS = ["新北","板橋","新莊","中和","永和","三重","蘆洲","新店","土城","林口","淡水","汐止","侯友宜"]
-
 EXCLUDE_HOME = ["一氧化碳","中毒","瓦斯","猝死","家中","送醫","急診"]
-def is_ntpc(t): 
+
+def is_ntpc(t):
     return any(k in (t or "") for k in NTPC_KEYS)
 
 def traffic_ok(t):
-    return not any(x in (t or "") for x in EXCLUDE_HOME)
+    t = t or ""
+    return not any(x in t for x in EXCLUDE_HOME)
 
 # ✅ 補教類「必含」關鍵字（沒有就不收）
 TUTOR_MUST = [
-    "補習班", "短期補習班", "補習教育", "補教", 
+    "補習班", "短期補習班", "補習教育", "補教",
     "課後照顧", "安親", "安親班", "課照",
     "才藝班", "語文短期補習班", "文理補習班"
 ]
 
-# ✅ 補教類「排除」關鍵字（混入交通/警政/消費娛樂常見）
+# ✅ 補教類「排除」關鍵字（混入交通/警政/娛樂/折扣等）
 TUTOR_EXCLUDE = [
     "派出所", "警方", "警分局", "警局", "交通", "行人", "路口", "公車", "捷運", "車禍",
     "棒球", "籃球", "羽球", "賽", "球隊", "演唱會", "影劇", "旅遊", "餐廳",
@@ -80,10 +133,8 @@ TUTOR_EXCLUDE = [
 
 def tutoring_ok(title: str) -> bool:
     t = title or ""
-    # 必須命中補教語意
     if not any(k in t for k in TUTOR_MUST):
         return False
-    # 若同時命中排除詞，直接剔除（避免混入交通/警政/娛樂）
     if any(x in t for x in TUTOR_EXCLUDE):
         return False
     return True
@@ -96,29 +147,28 @@ def real_link(u):
     try:
         r = requests.get(u, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
         return r.url
-    except: 
+    except:
         return u
 
-def line(t,l): 
+def line(t, l):
     return f'• <a href="{html(l)}">{html(t)}</a>'
 
 # ======================
-# 類別設定（補教類加強精準）
+# 類別設定
 # ======================
 CATS = {
- "🚦 交通安全": {
-   "ntpc": "新北 (交通事故 OR 行人 OR 公車 OR 機車 OR 路口 OR 通學巷 OR 斑馬線)",
-   "all":  "(交通事故 OR 行人 OR 公車 OR 機車 OR 路口 OR 通學巷 OR 斑馬線)"
- },
- "📚 終身學習": {
-   "ntpc": "新北 (終身學習 OR 社區大學 OR 樂齡學習 OR 學習活動 OR 成果)",
-   "all":  "(終身學習 OR 社區大學 OR 樂齡學習 OR 學習活動 OR 成果)"
- },
- # ✅ 補教類：搜尋字串本身也改為「補教核心詞」為主，降低雜訊
- "🏫 補教類（補習班）": {
-   "ntpc": "新北 (補習班 OR 短期補習班 OR 補習教育 OR 課後照顧 OR 安親班 OR 才藝班 OR 退費 OR 稽查 OR 未立案)",
-   "all":  "(補習班 OR 短期補習班 OR 補習教育 OR 課後照顧 OR 安親班 OR 才藝班 OR 退費 OR 稽查 OR 未立案)"
- }
+    "🚦 交通安全": {
+        "ntpc": "新北 (交通事故 OR 行人 OR 公車 OR 機車 OR 路口 OR 通學巷 OR 斑馬線)",
+        "all":  "(交通事故 OR 行人 OR 公車 OR 機車 OR 路口 OR 通學巷 OR 斑馬線)"
+    },
+    "📚 終身學習": {
+        "ntpc": "新北 (終身學習 OR 社區大學 OR 樂齡學習 OR 學習活動 OR 成果)",
+        "all":  "(終身學習 OR 社區大學 OR 樂齡學習 OR 學習活動 OR 成果)"
+    },
+    "🏫 補教類（補習班）": {
+        "ntpc": "新北 (補習班 OR 短期補習班 OR 補習教育 OR 課後照顧 OR 安親班 OR 才藝班 OR 退費 OR 稽查 OR 未立案)",
+        "all":  "(補習班 OR 短期補習班 OR 補習教育 OR 課後照顧 OR 安親班 OR 才藝班 OR 退費 OR 稽查 OR 未立案)"
+    }
 }
 
 def advice(cat):
@@ -128,21 +178,27 @@ def advice(cat):
         return "建議以參與觸及與學習成效為核心，強化社大/樂齡與在地資源串接，提升續學率與品質一致性。"
     return "建議以風險導向稽查與資訊透明並進，聚焦未立案、退費與不當對待等高關注議題，強化跨機關聯稽與家長辨識宣導。"
 
+# ======================
+# 主程式
+# ======================
 def main():
+    # ✅ 台灣 07:40 時間鎖（排程必準時、同日不重複）
+    if not taipei_time_lock():
+        return
+
     cache = load_cache()
     prune_cache(cache)
 
     today = datetime.date.today().isoformat()
-    blocks=[]
+    blocks = []
 
-    for cat,qs in CATS.items():
+    for cat, qs in CATS.items():
         ents = fetch(qs["ntpc"]) + fetch(qs["all"])
         ntpc, other, fill = [], [], []
-        seen=set()
+        seen = set()
 
         for e in ents:
             t = (e.title or "").strip()
-            l = real_link(e.link)
 
             # 類別專屬過濾
             if "交通" in cat and not traffic_ok(t):
@@ -150,25 +206,28 @@ def main():
             if "補教類" in cat and not tutoring_ok(t):
                 continue
 
+            l = real_link(e.link)
             k = l or t
             if not k or k in seen or k in cache:
                 continue
 
             seen.add(k)
-            cache[k]={"ts":int(time.time())}
+            cache[k] = {"ts": int(time.time())}
 
-            if is_ntpc(t) and len(ntpc)<MAX_NTPC:
-                ntpc.append(line(t,l))
+            if is_ntpc(t) and len(ntpc) < MAX_NTPC:
+                ntpc.append(line(t, l))
                 continue
-            if (not is_ntpc(t)) and len(other)<MAX_OTHER:
-                other.append(line(t,l))
+            if (not is_ntpc(t)) and len(other) < MAX_OTHER:
+                other.append(line(t, l))
                 continue
-            if len(fill)<MIN_TOTAL:
-                fill.append(line(t,l))
+            if len(fill) < MIN_TOTAL:
+                fill.append(line(t, l))
 
-        # 保底：避免空欄（但補教仍受 tutoring_ok 約束，不會亂補）
-        if not ntpc and fill: ntpc.append(fill.pop(0))
-        if not other and fill: other.append(fill.pop(0))
+        # 保底：避免空欄（補教仍受 tutoring_ok 限制，不會亂補）
+        if not ntpc and fill:
+            ntpc.append(fill.pop(0))
+        if not other and fill:
+            other.append(fill.pop(0))
 
         blocks.append(
             f"<b>{cat}</b>\n"
@@ -181,9 +240,10 @@ def main():
     tg_send_chunked(msg)
     save_cache(cache)
 
-if __name__=="__main__":
+if __name__ == "__main__":
     try:
         main()
     except:
         traceback.print_exc()
+        # 不讓 workflow 直接紅燈（以免你誤判系統壞掉），但仍保留 log
         raise SystemExit(0)
