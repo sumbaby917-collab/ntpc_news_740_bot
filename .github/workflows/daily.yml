@@ -1,56 +1,31 @@
 name: Daily Report Bot
 
 on:
-  # 每 5 分鐘跑一次，交給程式用台灣時間鎖定 07:40 發送
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: daily-report-bot
-  cancel-in-progress: true
 
 jobs:
   run-report:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.9"
 
-      - name: Install dependencies
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           pip install feedparser requests google-generativeai
 
-      # ✅ 用 Actions cache 保存「今日是否已送」狀態，避免重複推播
-      - name: Restore state cache
-        uses: actions/cache@v4
-        with:
-          path: state
-          key: state-${{ github.workflow }}-${{ github.ref_name }}
-          restore-keys: |
-            state-${{ github.workflow }}-
-
-      - name: Run news bot (Taipei time lock)
+      - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          mkdir -p state
-          python main.py
-
-      - name: Save state cache
-        uses: actions/cache@v4
-        with:
-          path: state
-          key: state-${{ github.workflow }}-${{ github.ref_name }}
+        run: python main.py
