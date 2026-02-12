@@ -16,27 +16,20 @@ MIN_TOTAL = 3
 TG_MAX = 3500
 
 # ======================
-# 台灣時間鎖（07:40-07:49 才自動送）
+# 台灣時間鎖（07:40-07:44 才自動送；同日只送一次）
 # ======================
 def taipei_time_lock():
-    """
-    自動排程：只允許台灣時間 07:40～07:49 發送（10 分鐘容錯窗）
-    並用 state/last_sent_date.txt 防止同日重複發送
-
-    手動 workflow_dispatch：允許立即發送（用來測試）
-    """
     tz = ZoneInfo("Asia/Taipei")
     now = datetime.datetime.now(tz)
     today = now.date().isoformat()
 
-    # 容錯窗：07:40 - 07:49
-    in_window = (now.hour == 7 and 40 <= now.minute <= 49)
+    # 只允許台灣時間 07:40～07:44
+    if not (now.hour == 7 and 40 <= now.minute <= 44):
+        print(f"Not in Taipei window (07:40-07:44). Now={now.isoformat()}. Exit.")
+        return False
 
-    # GitHub event 名稱：schedule / workflow_dispatch / push...
-    is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
-    if is_manual:
-        return True
-
+    # 同日防重複
+    os.makedirs("state", exist_ok=True)
     state_file = os.path.join("state", "last_sent_date.txt")
     if os.path.exists(state_file):
         try:
@@ -47,12 +40,7 @@ def taipei_time_lock():
         except:
             pass
 
-    if not in_window:
-        print(f"Not in Taipei window. Now={now.isoformat()}. Exit.")
-        return False
-
-    # 進入窗口且尚未送出：先寫入狀態避免併發重複
-    os.makedirs("state", exist_ok=True)
+    # 先寫入避免併發重複
     with open(state_file, "w", encoding="utf-8") as f:
         f.write(today)
     return True
@@ -182,7 +170,7 @@ def advice(cat):
 # 主程式
 # ======================
 def main():
-    # ✅ 台灣 07:40 時間鎖（排程必準時、同日不重複）
+    # ✅ 台灣 07:40-07:44 時間鎖（同日不重複）
     if not taipei_time_lock():
         return
 
@@ -245,5 +233,5 @@ if __name__ == "__main__":
         main()
     except:
         traceback.print_exc()
-        # 不讓 workflow 直接紅燈（以免你誤判系統壞掉），但仍保留 log
+        # 不讓 workflow 直接紅燈（保留 log、避免誤判）
         raise SystemExit(0)
