@@ -16,14 +16,63 @@ MIN_TOTAL = 3
 TG_MAX = 3500
 
 # ======================
-# 台灣時間鎖（07:40-07:44 才自動送；同日只送一次）
+# Telegram
+# ======================
+def tg_send(text):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram secrets missing. TELEGRAM_TOKEN / TELEGRAM_CHAT_ID not set.")
+        return None
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        resp = requests.post(url, data={
+            "chat_id": TELELEGRAM_CHAT_ID_FIX(),
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }, timeout=25)
+        # ✅ 把回應寫到 Actions log（用來追原因）
+        print(f"TG status={resp.status_code} body={resp.text[:300]}")
+        return resp
+    except Exception as e:
+        print(f"TG exception: {e}")
+        return None
+
+def TELELEGRAM_CHAT_ID_FIX():
+    # 避免 chat_id 被誤植空白
+    return str(TELEGRAM_CHAT_ID).strip()
+
+def tg_send_chunked(msg):
+    parts, buf = [], ""
+    for p in msg.split("\n\n"):
+        if len(buf) + len(p) < TG_MAX:
+            buf += ("\n\n" + p if buf else p)
+        else:
+            parts.append(buf)
+            buf = p
+    if buf:
+        parts.append(buf)
+
+    for i, p in enumerate(parts, 1):
+        tg_send((f"（{i}/{len(parts)}）\n" if len(parts) > 1 else "") + p)
+        time.sleep(1)
+
+# ======================
+# 台灣時間鎖（07:40-07:44 自動送；同日只送一次）
+# 手動 workflow_dispatch：一定允許送（用於驗證）
 # ======================
 def taipei_time_lock():
+    event = os.getenv("GITHUB_EVENT_NAME", "")
     tz = ZoneInfo("Asia/Taipei")
     now = datetime.datetime.now(tz)
     today = now.date().isoformat()
 
-    # 只允許台灣時間 07:40～07:44
+    # ✅ 手動執行：放行（用來測試，不受時間窗限制）
+    if event == "workflow_dispatch":
+        print("Manual dispatch: bypass time lock.")
+        return True
+
+    # 自動排程：只允許台灣 07:40～07:44
     if not (now.hour == 7 and 40 <= now.minute <= 44):
         print(f"Not in Taipei window (07:40-07:44). Now={now.isoformat()}. Exit.")
         return False
@@ -68,30 +117,6 @@ def prune_cache(c):
         if now - c[k].get("ts",0) > CACHE_DAYS * 86400:
             del c[k]
 
-def tg_send(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    return requests.post(url, data={
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }, timeout=20)
-
-def tg_send_chunked(msg):
-    parts, buf = [], ""
-    for p in msg.split("\n\n"):
-        if len(buf) + len(p) < TG_MAX:
-            buf += ("\n\n" + p if buf else p)
-        else:
-            parts.append(buf)
-            buf = p
-    if buf:
-        parts.append(buf)
-
-    for i, p in enumerate(parts, 1):
-        tg_send((f"（{i}/{len(parts)}）\n" if len(parts) > 1 else "") + p)
-        time.sleep(1)
-
 # ======================
 # 新聞處理
 # ======================
@@ -105,20 +130,16 @@ def traffic_ok(t):
     t = t or ""
     return not any(x in t for x in EXCLUDE_HOME)
 
-# ✅ 補教類「必含」關鍵字（沒有就不收）
 TUTOR_MUST = [
     "補習班", "短期補習班", "補習教育", "補教",
     "課後照顧", "安親", "安親班", "課照",
     "才藝班", "語文短期補習班", "文理補習班"
 ]
-
-# ✅ 補教類「排除」關鍵字（混入交通/警政/娛樂/折扣等）
 TUTOR_EXCLUDE = [
     "派出所", "警方", "警分局", "警局", "交通", "行人", "路口", "公車", "捷運", "車禍",
     "棒球", "籃球", "羽球", "賽", "球隊", "演唱會", "影劇", "旅遊", "餐廳",
     "股市", "理財", "房市", "打折", "優惠", "Cheapo"
 ]
-
 def tutoring_ok(title: str) -> bool:
     t = title or ""
     if not any(k in t for k in TUTOR_MUST):
@@ -133,7 +154,7 @@ def fetch(q, n=30):
 
 def real_link(u):
     try:
-        r = requests.get(u, timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+        r = requests.get(u, timeout=12, headers={"User-Agent":"Mozilla/5.0"})
         return r.url
     except:
         return u
@@ -170,9 +191,12 @@ def advice(cat):
 # 主程式
 # ======================
 def main():
-    # ✅ 台灣 07:40-07:44 時間鎖（同日不重複）
     if not taipei_time_lock():
         return
+
+    # ✅ 手動 Run 時，先送一則「測試啟動」確保 TG 管道通
+    if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        tg_send("✅ Daily Report Bot 測試啟動：已收到手動執行訊號（此為管道驗證訊息）")
 
     cache = load_cache()
     prune_cache(cache)
@@ -188,7 +212,6 @@ def main():
         for e in ents:
             t = (e.title or "").strip()
 
-            # 類別專屬過濾
             if "交通" in cat and not traffic_ok(t):
                 continue
             if "補教類" in cat and not tutoring_ok(t):
@@ -203,19 +226,14 @@ def main():
             cache[k] = {"ts": int(time.time())}
 
             if is_ntpc(t) and len(ntpc) < MAX_NTPC:
-                ntpc.append(line(t, l))
-                continue
+                ntpc.append(line(t, l)); continue
             if (not is_ntpc(t)) and len(other) < MAX_OTHER:
-                other.append(line(t, l))
-                continue
+                other.append(line(t, l)); continue
             if len(fill) < MIN_TOTAL:
                 fill.append(line(t, l))
 
-        # 保底：避免空欄（補教仍受 tutoring_ok 限制，不會亂補）
-        if not ntpc and fill:
-            ntpc.append(fill.pop(0))
-        if not other and fill:
-            other.append(fill.pop(0))
+        if not ntpc and fill: ntpc.append(fill.pop(0))
+        if not other and fill: other.append(fill.pop(0))
 
         blocks.append(
             f"<b>{cat}</b>\n"
@@ -231,7 +249,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except:
+    except Exception:
         traceback.print_exc()
-        # 不讓 workflow 直接紅燈（保留 log、避免誤判）
         raise SystemExit(0)
